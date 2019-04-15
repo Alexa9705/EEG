@@ -1,0 +1,192 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import LinearFIR
+from scipy.stats import kurtosis
+from scipy import signal 
+from numpy import dtype
+from scipy.stats import linregress
+
+#Function to load signal
+def CargarSenal(ruta,delimitador,eliminar,columnas):
+    data=np.loadtxt(ruta,delimiter=delimitador,skiprows=eliminar,usecols=columnas)
+    return data
+
+my_data_1=CargarSenal('P1_RAWEEG_2018-11-15_Electrobisturí1_3min.txt',',',6,[1,2,3,4,5,6,7,8])
+my_data_2=CargarSenal('P1_RAWEEG_2018-11-15_Electrobisturí2_2min.txt',',',6,[1,2,3,4,5,6,7,8])
+my_data_3=CargarSenal('P1_RAWEEG_2018-11-15_FinProcedimiento_53min.txt',',',6, [1,2,3,4,5,6,7,8])
+my_data_4=CargarSenal('P1_RAWEEG_2018-11-15_OjosCerrados_2min.txt',',',6, [1,2,3,4,5,6,7,8])
+
+#Signals filter=LinearFIR
+filtro1=LinearFIR.eegfiltnew(my_data_1, 250, 1, 50, 0, 0)
+filtro2=LinearFIR.eegfiltnew(my_data_2, 250, 1, 50, 0, 0)
+filtro3=LinearFIR.eegfiltnew(my_data_3, 250, 1, 50, 0, 0)
+filtro4=LinearFIR.eegfiltnew(my_data_4, 250, 1, 50, 0, 0)
+
+#Vector time creation
+tiempo_f1=np.arange(0,filtro1.shape[0]/250,1/250)
+tiempo_f2=np.arange(0,filtro2.shape[0]/250,1/250)
+tiempo_f3=np.arange(0,filtro3.shape[0]/250,1/250)
+tiempo_f4=np.arange(0,filtro4.shape[0]/250,1/250)
+
+#Creating the DC level for visualization
+DC=[0,150,250,350,450,550,650,750]
+
+#Function for signal segmentation
+def segmentacion(filtro,tiempo,fs,epoca):
+    
+    Dim=filtro.shape
+    Residuo=Dim[0]%(fs*epoca)
+    Total_Time=Dim[0]/fs
+    Segmentacion_Data=np.split(filtro[0:Dim[0]-Residuo,:], int(Total_Time//epoca))
+    time=np.split(tiempo[0:Dim[0]-Residuo], int(Total_Time//epoca))
+    
+    return np.array(Segmentacion_Data),np.array(time)
+
+#Segmentation function implementation
+S1_array,time1=segmentacion(filtro1,tiempo_f1,250,2)
+S2_array,time2=segmentacion(filtro2,tiempo_f2,250,2)
+S3_array,time3=segmentacion(filtro3,tiempo_f3,250,2)
+S4_array,time4=segmentacion(filtro4,tiempo_f4,250,2)
+
+#FIRST METHOD: REJECTION FOR EXTREME VALUES
+ 
+#This function is make for search the maximums segments and the minimum segments that don't satisfy the condition,
+#and then, they are rejected. 
+def Rechazo (umbralmaximo,umbralminimo,SegmentoArray):
+    Vunos=np.ones((SegmentoArray.shape[0],1))
+    valormaximo=SegmentoArray.max(axis=1)
+    valorminimo=SegmentoArray.min(axis=1)
+     
+    for i in range(0,8):
+        index=np.where(valormaximo[:,i]>umbralmaximo)
+        Vunos[index]=0
+        index=np.where(valorminimo[:,i]<umbralminimo)
+        Vunos[index]=0
+          
+    Rechazo=Vunos.transpose()[0]   
+    Data=SegmentoArray[Rechazo==1,:,:]
+    size=Data.shape
+    Signal=np.zeros((size[0]*size[1],size[2]),dtype=np.int)
+    for i in range(0,size[2]):
+        Signal[:,i]=Data[:,:,i].ravel()
+         
+    return Signal 
+
+# SenalSeg1_Valores=Rechazo(75,-75,S1_array)
+# SenalSeg2_Valores=Rechazo(75,-75,S2_array)
+# SenalSeg3_Valores=Rechazo(75,-75,S3_array)
+# SenalSeg4_Valores=Rechazo(75,-75,S4_array)
+#   
+# plt.plot(SenalSeg4_Valores+DC)
+# plt.title('REJECT FOR EXTREME VALUES')
+# plt.xlabel('Time [s]')
+# plt.show()
+
+#SECOND METHOD: REJECT FOR LINEAL TENDENCY
+def TENDENCIA_LINEAL(SegmentoArray,umbralmax,umbralmin,time):
+    Dim=SegmentoArray.shape
+    Unos=np.ones((Dim[0],1),dtype=np.int)
+    Pendiente=np.zeros((Dim[0],Dim[2]),dtype=np.float32)
+      
+    for j in range (0,Dim[2]):
+        for i in range(0,Dim[0]):
+            Regresion=np.polyfit(time[j],SegmentoArray[i,:,j],1)
+            Pendiente[i,j]=Regresion[0]
+  
+      
+                 
+    for k in range(0,Dim[2]):
+        index=np.where(Pendiente[:,k]>umbralmax)
+        Unos[index]=0
+        index=np.where(Pendiente[:,k]<umbralmin)
+        Unos[index]=0
+   
+    Tendencia=Unos.transpose()[0] 
+    Data=SegmentoArray[Tendencia==1,:,:]
+    size=Data.shape
+    Signal=np.zeros((size[0]*size[1],size[2]),dtype=np.int)
+    for i in range(0,size[2]):
+        Signal[:,i]=Data[:,:,i].ravel() 
+    return Signal
+   
+# SenalSeg1_Regresion=TENDENCIA_LINEAL(S1_array+DC,4,-4,time1)
+# SenalSeg2_Regresion=TENDENCIA_LINEAL(S2_array+DC,4,-4,time2)
+# SenalSeg3_Regresion=TENDENCIA_LINEAL(S3_array+DC,4,-4,time3)
+# SenalSeg4_Regresion=TENDENCIA_LINEAL(S4_array+DC,4,-4,time4)
+# plt.title('REJECT FOR LINEAL TENDENCY')
+# plt.xlabel("Time[s]")
+# plt.plot(SenalSeg4_Regresion+DC)
+# plt.show()
+ 
+#THIRD METHOD: REJECT FOR IMPROBABILITY 
+#This function is created to search the maximums and minimums segments that don't satisfy the conditions...then, they are rejected.
+def Kurtosis (umbralmaximo,umbralminimo,SegmentoArray):
+    Unos=np.ones((SegmentoArray.shape[0],1))
+    Kurt1=kurtosis(SegmentoArray,axis=1)
+          
+    for i in range(0,8):
+        index=np.where(Kurt1[:,i]>umbralmaximo)
+        Unos[index]=0
+        index=np.where(Kurt1[:,i]<umbralminimo)
+        Unos[index]=0
+            
+    Rechazo=Unos.transpose()[0]   
+    Data=SegmentoArray[Rechazo==1,:,:]
+    size=Data.shape
+    Signal=np.zeros((size[0]*size[1],size[2]),dtype=np.int)
+    for i in range(0,size[2]):
+        Signal[:,i]=Data[:,:,i].ravel()
+           
+    return Signal 
+  
+# SenalSeg1_Kurtosis=Kurtosis(3,-3,S1_array)
+# SenalSeg2_Kurtosis=Kurtosis(3,-3,S2_array)
+# SenalSeg3_Kurtosis=Kurtosis(3,-3,S3_array)
+# SenalSeg4_Kurtosis=Kurtosis(3,-3,S4_array)
+# plt.plot(SenalSeg4_Kurtosis+DC)
+# 
+# 
+# plt.title("REJECT FOR IMPROBABILITY")
+# plt.xlabel('Time [s]')
+# plt.show()
+
+ 
+#FOURTH METHOD: REJECT FOR SPECTRAL PATTERN
+def PATRON_ESPECTRAL(SegmentoArray,frec,umbralmax,umbralmin):
+    Dim=SegmentoArray.shape 
+    Unos=np.ones((Dim[0],1),dtype=np.int)
+    Pmax=np.zeros((Dim[0],Dim[2]),dtype=np.float32)
+    Pmin=np.zeros((Dim[0],Dim[2]),dtype=np.float32)
+     
+     
+    for j in range (0,Dim[2]):
+        for i in range(0,Dim[0]):
+            F,Pxx= signal.welch(SegmentoArray[i,:,j],frec,"hanning",Dim[1])
+            media=np.mean(Pxx)
+            Pot=Pxx-media
+            Pmax[i,j]=Pot.max()
+            Pmin[i,j]=Pot.min()  
+     
+    for k in range(0,Dim[2]):
+        index=np.where(Pmax[:,k]>umbralmax)
+        Unos[index]=0
+        index=np.where(Pmin[:,k]<umbralmin)
+        Unos[index]=0
+     
+     
+    Patron=Unos.transpose()[0] 
+    Data=SegmentoArray[Patron==1,:,:]
+    size=Data.shape
+    Signal=np.zeros((size[0]*size[1],size[2]),dtype=np.int)
+    for i in range(0,size[2]):
+        Signal[:,i]=Data[:,:,i].ravel()
+    return Signal
+ 
+SenalSeg1_Patron= PATRON_ESPECTRAL(S1_array, 250,200,-5)
+SenalSeg2_Patron= PATRON_ESPECTRAL(S2_array, 250,200,-5)
+SenalSeg3_Patron= PATRON_ESPECTRAL(S3_array, 250,200,-5)
+SenalSeg4_Patron= PATRON_ESPECTRAL(S4_array, 250,200,-5)
+plt.plot(SenalSeg4_Patron+DC)
+plt.xlabel('Time [s]')
+plt.title('REJECT FOR SPECTRAL PATTERN')
+plt.show()
